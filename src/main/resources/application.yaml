@@ -4,3 +4,6 @@ ktor:
       - com.aarokoinsaari.ApplicationKt.module
   deployment:
     port: 8080
+
+redis:
+  url: "redis://localhost:6379"
