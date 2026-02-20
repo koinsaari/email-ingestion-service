@@ -1,13 +1,32 @@
 package com.aarokoinsaari
 
-import io.ktor.server.application.*
+import io.ktor.http.HttpStatusCode
+import io.ktor.serialization.kotlinx.json.json
+import io.ktor.server.application.Application
+import io.ktor.server.application.install
+import io.ktor.server.plugins.calllogging.CallLogging
+import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.server.plugins.statuspages.StatusPages
+import io.ktor.server.response.respondText
+import org.slf4j.event.Level
 
 fun main(args: Array<String>) {
     io.ktor.server.netty.EngineMain.main(args)
 }
 
 fun Application.module() {
-    configureSerialization()
-    configureMonitoring()
-    configureRouting()
+    install(ContentNegotiation) {
+        json()
+    }
+    install(CallLogging) {
+        level = Level.INFO
+    }
+    install(StatusPages) {
+        exception<Throwable> { call, cause ->
+            call.respondText(
+                text = "500: ${cause.message}",
+                status = HttpStatusCode.InternalServerError
+            )
+        }
+    }
 }
