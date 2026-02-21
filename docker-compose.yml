@@ -1,0 +1,23 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      REDIS_URL: "redis://redis:6379"
+      ARCHIVE_PATH: "/data/enron_mail_20150507.tar.gz"
+    volumes:
+      - ./data/enron_mail_20150507.tar.gz:/data/enron_mail_20150507.tar.gz:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5

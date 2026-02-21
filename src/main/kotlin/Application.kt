@@ -36,9 +36,11 @@ fun Application.module() {
         }
     }
 
-    val redisUrl = environment.config.propertyOrNull("redis.url")?.getString()
+    val redisUrl = System.getenv("REDIS_URL")
+        ?: environment.config.propertyOrNull("redis.url")?.getString()
         ?: "redis://localhost:6379"
-    val archivePath = environment.config.propertyOrNull("ingestion.archivePath")?.getString()
+    val archivePath = System.getenv("ARCHIVE_PATH")
+        ?: environment.config.propertyOrNull("ingestion.archivePath")?.getString()
         ?: "enron_mail_20150507.tar.gz"
     val repository = RedisRepository(redisUrl)
     val scope = CoroutineScope(SupervisorJob())
