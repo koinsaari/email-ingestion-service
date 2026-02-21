@@ -17,6 +17,7 @@ class RedisRepository(redisUrl: String) : AutoCloseable {
         const val STATUS_IDLE = "idle"
         const val STATUS_RUNNING = "running"
         const val STATUS_FINISHED = "finished"
+        const val STATUS_FAILED = "failed"
     }
 
     fun getStatus(): String =

@@ -36,56 +36,64 @@ class IngestionService(
         val channel = Channel<String>(capacity = 1000)
 
         scope.launch(Dispatchers.IO) {
-            launch {
-                streamArchive(channel)
-            }
+            try {
+                launch {
+                    streamArchive(channel)
+                }
 
-            val workerJobs = List(10) {
-                launch(Dispatchers.Default) {
-                    val batch = mutableListOf<String>()
+                val workerJobs = List(10) {
+                    launch(Dispatchers.Default) {
+                        val batch = mutableListOf<String>()
 
-                    for (rawEmail in channel) {
-                        val sender = parseSender(rawEmail) ?: continue
-                        batch.add(sender)
+                        for (rawEmail in channel) {
+                            val sender = parseSender(rawEmail) ?: continue
+                            batch.add(sender)
 
-                        if (batch.size >= 500) {
+                            if (batch.size >= 500) {
+                                repository.flushBatch(batch)
+                                batch.clear()
+                            }
+                        }
+
+                        if (batch.isNotEmpty()) {
                             repository.flushBatch(batch)
-                            batch.clear()
                         }
                     }
-
-                    if (batch.isNotEmpty()) {
-                        repository.flushBatch(batch)
-                    }
                 }
-            }
 
-            workerJobs.joinAll()
-            repository.setStatus(RedisRepository.STATUS_FINISHED)
-            logger.info("Ingestion finished. Total: ${repository.getTotalMessages()}")
+                workerJobs.joinAll()
+                repository.setStatus(RedisRepository.STATUS_FINISHED)
+                logger.info("Ingestion finished. Total: ${repository.getTotalMessages()}")
+            } catch (e: Exception) {
+                logger.error("Ingestion failed", e)
+                repository.setStatus(RedisRepository.STATUS_FAILED)
+            }
         }
 
         return true
     }
 
     private suspend fun streamArchive(channel: Channel<String>) {
-        FileInputStream(archivePath).use { fileStream ->
-            BufferedInputStream(fileStream).use { buffered ->
-                GzipCompressorInputStream(buffered).use { gzip ->
-                    TarArchiveInputStream(gzip).use { tar ->
-                        var entry = tar.nextEntry
-                        while (entry != null) {
-                            if (!entry.isDirectory) {
-                                val bytes = tar.readBytes()
-                                channel.send(String(bytes))
+        try {
+            FileInputStream(archivePath).use { fileStream ->
+                BufferedInputStream(fileStream).use { buffered ->
+                    GzipCompressorInputStream(buffered).use { gzip ->
+                        TarArchiveInputStream(gzip).use { tar ->
+                            var entry = tar.nextEntry
+                            while (entry != null) {
+                                if (!entry.isDirectory) {
+                                    val bytes = tar.readBytes()
+                                    channel.send(String(bytes))
+                                }
+                                entry = tar.nextEntry
                             }
-                            entry = tar.nextEntry
                         }
                     }
                 }
             }
+        } finally {
+            channel.close()
         }
-        channel.close()
     }
 
     private fun parseSender(rawEmail: String): String? =
