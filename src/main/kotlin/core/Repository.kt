@@ -41,6 +41,19 @@ class RedisRepository(redisUrl: String) : AutoCloseable {
         commands.zrevrangeWithScores(KEY_TOP_SENDERS, 0, limit - 1)
             .map { it.value to it.score }
 
+    fun flushBatch(senders: List<String>) {
+        val async = connection.async()
+        connection.setAutoFlushCommands(false)
+
+        async.incrby(KEY_TOTAL, senders.size.toLong())
+        for (sender in senders) {
+            async.zincrby(KEY_TOP_SENDERS, 1.0, sender)
+        }
+
+        connection.flushCommands()
+        connection.setAutoFlushCommands(true)
+    }
+
     fun resetAll() {
         commands.del(KEY_STATUS, KEY_TOTAL, KEY_TOP_SENDERS)
     }

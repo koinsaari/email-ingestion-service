@@ -38,9 +38,11 @@ fun Application.module() {
 
     val redisUrl = environment.config.propertyOrNull("redis.url")?.getString()
         ?: "redis://localhost:6379"
+    val archivePath = environment.config.propertyOrNull("ingestion.archivePath")?.getString()
+        ?: "enron_mail_20150507.tar.gz"
     val repository = RedisRepository(redisUrl)
     val scope = CoroutineScope(SupervisorJob())
-    val ingestionService = IngestionService(repository, scope)
+    val ingestionService = IngestionService(repository, scope, archivePath)
 
     routing {
         ingestionRoutes(repository, ingestionService)

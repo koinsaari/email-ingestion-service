@@ -1,11 +1,29 @@
 package com.aarokoinsaari.core
 
+import jakarta.mail.Session
+import jakarta.mail.internet.InternetAddress
+import jakarta.mail.internet.MimeMessage
+import java.io.BufferedInputStream
+import java.io.ByteArrayInputStream
+import java.io.FileInputStream
+import java.util.Properties
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.joinAll
+import kotlinx.coroutines.launch
+import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
+import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
+import org.slf4j.LoggerFactory
 
 class IngestionService(
     private val repository: RedisRepository,
-    private val scope: CoroutineScope
+    private val scope: CoroutineScope,
+    private val archivePath: String
 ) {
+
+    private val logger = LoggerFactory.getLogger(IngestionService::class.java)
+    private val mailSession = Session.getDefaultInstance(Properties())
 
     fun start(): Boolean {
         if (repository.getStatus() == RedisRepository.STATUS_RUNNING) {
@@ -15,9 +33,67 @@ class IngestionService(
         repository.resetAll()
         repository.setStatus(RedisRepository.STATUS_RUNNING)
 
-        // TODO: launch streaming
+        val channel = Channel<String>(capacity = 1000)
 
-        repository.setStatus(RedisRepository.STATUS_FINISHED)
+        scope.launch(Dispatchers.IO) {
+            launch {
+                streamArchive(channel)
+            }
+
+            val workerJobs = List(10) {
+                launch(Dispatchers.Default) {
+                    val batch = mutableListOf<String>()
+
+                    for (rawEmail in channel) {
+                        val sender = parseSender(rawEmail) ?: continue
+                        batch.add(sender)
+
+                        if (batch.size >= 500) {
+                            repository.flushBatch(batch)
+                            batch.clear()
+                        }
+                    }
+
+                    if (batch.isNotEmpty()) {
+                        repository.flushBatch(batch)
+                    }
+                }
+            }
+
+            workerJobs.joinAll()
+            repository.setStatus(RedisRepository.STATUS_FINISHED)
+            logger.info("Ingestion finished. Total: ${repository.getTotalMessages()}")
+        }
+
         return true
     }
+
+    private suspend fun streamArchive(channel: Channel<String>) {
+        FileInputStream(archivePath).use { fileStream ->
+            BufferedInputStream(fileStream).use { buffered ->
+                GzipCompressorInputStream(buffered).use { gzip ->
+                    TarArchiveInputStream(gzip).use { tar ->
+                        var entry = tar.nextEntry
+                        while (entry != null) {
+                            if (!entry.isDirectory) {
+                                val bytes = tar.readBytes()
+                                channel.send(String(bytes))
+                            }
+                            entry = tar.nextEntry
+                        }
+                    }
+                }
+            }
+        }
+        channel.close()
+    }
+
+    private fun parseSender(rawEmail: String): String? =
+        try {
+            val message = MimeMessage(mailSession, ByteArrayInputStream(rawEmail.toByteArray()))
+            val from = message.from?.firstOrNull() as? InternetAddress
+            from?.address?.lowercase()
+        } catch (e: Exception) {
+            null // TODO
+        }
 }

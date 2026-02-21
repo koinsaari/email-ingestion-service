@@ -7,3 +7,6 @@ ktor:
 
 redis:
   url: "redis://localhost:6379"
+
+ingestion:
+  archivePath: "enron_mail_20150507.tar.gz"
