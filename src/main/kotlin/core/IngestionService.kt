@@ -40,7 +40,7 @@ class IngestionService(
         repository.resetAll()
         repository.setStatus(RedisRepository.STATUS_RUNNING)
 
-        val channel = Channel<String>(capacity = CHANNEL_CAPACITY)
+        val channel = Channel<ByteArray>(capacity = CHANNEL_CAPACITY)
 
         scope.launch(Dispatchers.IO) {
             try {
@@ -80,24 +80,23 @@ class IngestionService(
         return true
     }
 
-    private suspend fun streamArchive(channel: Channel<String>) {
+    private suspend fun streamArchive(channel: Channel<ByteArray>) {
         try {
-            FileInputStream(archivePath).use { fileStream ->
-                BufferedInputStream(fileStream).use { buffered ->
-                    GzipCompressorInputStream(buffered).use { gzip ->
-                        TarArchiveInputStream(gzip).use { tar ->
-                            var entry = tar.nextEntry
-                            while (entry != null) {
-                                if (!entry.isDirectory && entry.size <= MAX_ENTRY_SIZE) {
-                                    val bytes = tar.readBytes()
-                                    channel.send(String(bytes))
-                                } else if (entry.size > MAX_ENTRY_SIZE) {
-                                    logger.warn("Skipping oversized entry: ${entry.name} (${entry.size} bytes)")
-                                }
-                                entry = tar.nextEntry
-                            }
-                        }
+            val tar = TarArchiveInputStream(
+                GzipCompressorInputStream(
+                    BufferedInputStream(FileInputStream(archivePath))
+                )
+            )
+
+            tar.use {
+                var entry = tar.nextEntry
+                while (entry != null) {
+                    if (!entry.isDirectory && entry.size <= MAX_ENTRY_SIZE) {
+                        channel.send(tar.readBytes())
+                    } else if (entry.size > MAX_ENTRY_SIZE) {
+                        logger.warn("Skipping oversized entry: ${entry.name} (${entry.size} bytes)")
                     }
+                    entry = tar.nextEntry
                 }
             }
         } finally {
@@ -105,12 +104,13 @@ class IngestionService(
         }
     }
 
-    private fun parseSender(rawEmail: String): String? =
+    private fun parseSender(rawEmail: ByteArray): String? =
         try {
-            val message = MimeMessage(mailSession, ByteArrayInputStream(rawEmail.toByteArray()))
+            val message = MimeMessage(mailSession, ByteArrayInputStream(rawEmail))
             val from = message.from?.firstOrNull() as? InternetAddress
             from?.address?.lowercase()
         } catch (e: Exception) {
-            null // TODO
+            logger.debug("Failed to parse email: {}", e.message)
+            null
         }
 }
