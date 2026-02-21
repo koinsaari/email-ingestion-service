@@ -1,44 +1,71 @@
-# email-ingestion-service
+# Email Ingestion Service
 
-This project was created using the [Ktor Project Generator](https://start.ktor.io).
+An HTTP service that ingests an Enron Email Dataset and exposes the top senders via a REST API.
 
-Here are some useful links to get you started:
+## How It Works
 
-- [Ktor Documentation](https://ktor.io/docs/home.html)
-- [Ktor GitHub page](https://github.com/ktorio/ktor)
-- The [Ktor Slack chat](https://app.slack.com/client/T09229ZC6/C0A974TJ9). You'll need
-  to [request an invite](https://surveys.jetbrains.com/s3/kotlin-slack-sign-up) to join.
+The service streams the `.tar.gz` archive without extracting it to disk. A producer coroutine reads tar entries and sends raw email bytes into a bounded channel (capacity 1000). Ten worker coroutines consume from the channel, parse the `From:` header using Jakarta Mail, and flush sender counts to Redis in batches of 500 via pipelining.
 
-## Features
+Redis sorted sets handle the ranking — `ZINCRBY` on every sender, `ZREVRANGE` to query the top N. The channel provides backpressure: if workers fall behind, the producer suspends automatically.
 
-Here's a list of features included in this project:
+## Setup
 
-| Name                                                                   | Description                                                                        |
-|------------------------------------------------------------------------|------------------------------------------------------------------------------------|
-| [Routing](https://start.ktor.io/p/routing)                             | Provides a structured routing DSL                                                  |
-| [Content Negotiation](https://start.ktor.io/p/content-negotiation)     | Provides automatic content conversion according to Content-Type and Accept headers |
-| [kotlinx.serialization](https://start.ktor.io/p/kotlinx-serialization) | Handles JSON serialization using kotlinx.serialization library                     |
-| [Call Logging](https://start.ktor.io/p/call-logging)                   | Logs client requests                                                               |
-| [Status Pages](https://start.ktor.io/p/status-pages)                   | Provides exception handling for routes                                             |
+**Prerequisites:** Docker and Docker Compose.
 
-## Building & Running
-
-To build or run the project, use one of the following tasks:
-
-| Task                                    | Description                                                          |
-|-----------------------------------------|----------------------------------------------------------------------|
-| `./gradlew test`                        | Run the tests                                                        |
-| `./gradlew build`                       | Build everything                                                     |
-| `./gradlew buildFatJar`                 | Build an executable JAR of the server with all dependencies included |
-| `./gradlew buildImage`                  | Build the docker image to use with the fat JAR                       |
-| `./gradlew publishImageToLocalRegistry` | Publish the docker image locally                                     |
-| `./gradlew run`                         | Run the server                                                       |
-| `./gradlew runDocker`                   | Run using the local docker image                                     |
-
-If the server starts successfully, you'll see the following output:
-
-```
-2024-12-04 14:32:45.584 [main] INFO  Application - Application started in 0.303 seconds.
-2024-12-04 14:32:45.682 [main] INFO  Application - Responding at http://0.0.0.0:8080
+```bash
+git clone https://github.com/koinsaari/email-ingestion-service.git
+cd email-ingestion-service
+curl -O --output-dir data https://www.cs.cmu.edu/~enron/enron_mail_20150507.tar.gz
+docker compose up --build
 ```
 
+## API
+
+**Start ingestion:**
+```
+curl -X POST http://localhost:8080/start
+```
+Returns `202 Accepted` or `409 Conflict` if already running.
+
+**Check status:**
+```
+curl http://localhost:8080/status
+```
+```json
+{"status": "running", "messagesProcessed": 142350}
+```
+
+**Get top senders:**
+```
+curl http://localhost:8080/top-senders
+```
+```json
+[
+  {"email": "jeff.dasovich@enron.com", "count": 2941},
+  {"email": "vince.kaminski@enron.com", "count": 2672}
+]
+```
+
+## Running Tests
+
+Tests use [Testcontainers](https://testcontainers.com/) and require Docker running:
+
+```
+./gradlew test
+```
+
+## Configuration
+
+| Environment Variable | Default                        | Description           |
+|----------------------|--------------------------------|-----------------------|
+| `REDIS_URL`          | `redis://localhost:6379`       | Redis connection URL  |
+| `ARCHIVE_PATH`       | `enron_mail_20150507.tar.gz`   | Path to the `.tar.gz` |
+
+## Tech Stack
+
+- Kotlin 2.3, JDK 21
+- Ktor 3.4 (Netty)
+- Redis + Lettuce 7.4
+- Apache Commons Compress
+- Jakarta Mail
+- Testcontainers 2.0

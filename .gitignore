@@ -36,4 +36,5 @@ out/
 .vscode/
 
 ### Dataset ###
-data/
+data/*
+!data/.gitkeep
