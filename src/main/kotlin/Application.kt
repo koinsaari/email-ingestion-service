@@ -6,7 +6,9 @@ import com.aarokoinsaari.core.RedisRepository
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
+import io.ktor.server.application.ApplicationStopped
 import io.ktor.server.application.install
+import io.ktor.server.netty.EngineMain
 import io.ktor.server.plugins.calllogging.CallLogging
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.plugins.statuspages.StatusPages
@@ -14,10 +16,11 @@ import io.ktor.server.response.respondText
 import io.ktor.server.routing.routing
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import org.slf4j.event.Level
 
 fun main(args: Array<String>) {
-    io.ktor.server.netty.EngineMain.main(args)
+    EngineMain.main(args)
 }
 
 fun Application.module() {
@@ -45,6 +48,11 @@ fun Application.module() {
     val repository = RedisRepository(redisUrl)
     val scope = CoroutineScope(SupervisorJob())
     val ingestionService = IngestionService(repository, scope, archivePath)
+
+    monitor.subscribe(ApplicationStopped) {
+        scope.cancel()
+        repository.close()
+    }
 
     routing {
         ingestionRoutes(repository, ingestionService)

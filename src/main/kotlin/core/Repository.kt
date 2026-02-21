@@ -30,14 +30,6 @@ class RedisRepository(redisUrl: String) : AutoCloseable {
     fun getTotalMessages(): Long =
         commands.get(KEY_TOTAL)?.toLongOrNull() ?: 0L
 
-    fun incrementTotalMessages(count: Long) {
-        commands.incrby(KEY_TOTAL, count)
-    }
-
-    fun incrementSender(email: String, count: Double = 1.0) {
-        commands.zincrby(KEY_TOP_SENDERS, count, email)
-    }
-
     fun getTopSenders(limit: Long = 10): List<Pair<String, Double>> =
         commands.zrevrangeWithScores(KEY_TOP_SENDERS, 0, limit - 1)
             .map { it.value to it.score }
