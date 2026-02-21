@@ -35,5 +35,11 @@ dependencies {
     implementation("org.eclipse.angus:jakarta.mail:2.0.5")
     implementation("io.lettuce:lettuce-core:7.4.0.RELEASE")
     testImplementation("io.ktor:ktor-server-test-host")
-    testImplementation("org.jetbrains.kotlin:kotlin-test-junit:$kotlin_version")
+    testImplementation("org.jetbrains.kotlin:kotlin-test-junit5:$kotlin_version")
+    testImplementation("org.testcontainers:testcontainers:2.0.3")
+    testImplementation("org.testcontainers:testcontainers-junit-jupiter:2.0.3")
+}
+
+tasks.test {
+    useJUnitPlatform()
 }
