@@ -25,6 +25,13 @@ class IngestionService(
     private val logger = LoggerFactory.getLogger(IngestionService::class.java)
     private val mailSession = Session.getDefaultInstance(Properties())
 
+    companion object {
+        const val CHANNEL_CAPACITY = 1000
+        const val WORKER_COUNT = 10
+        const val BATCH_SIZE = 500
+        const val MAX_ENTRY_SIZE = 10 * 1024 * 1024L // 10MB
+    }
+
     fun start(): Boolean {
         if (repository.getStatus() == RedisRepository.STATUS_RUNNING) {
             return false
@@ -33,7 +40,7 @@ class IngestionService(
         repository.resetAll()
         repository.setStatus(RedisRepository.STATUS_RUNNING)
 
-        val channel = Channel<String>(capacity = 1000)
+        val channel = Channel<String>(capacity = CHANNEL_CAPACITY)
 
         scope.launch(Dispatchers.IO) {
             try {
@@ -41,7 +48,7 @@ class IngestionService(
                     streamArchive(channel)
                 }
 
-                val workerJobs = List(10) {
+                val workerJobs = List(WORKER_COUNT) {
                     launch(Dispatchers.Default) {
                         val batch = mutableListOf<String>()
 
@@ -49,7 +56,7 @@ class IngestionService(
                             val sender = parseSender(rawEmail) ?: continue
                             batch.add(sender)
 
-                            if (batch.size >= 500) {
+                            if (batch.size >= BATCH_SIZE) {
                                 repository.flushBatch(batch)
                                 batch.clear()
                             }
@@ -81,9 +88,11 @@ class IngestionService(
                         TarArchiveInputStream(gzip).use { tar ->
                             var entry = tar.nextEntry
                             while (entry != null) {
-                                if (!entry.isDirectory) {
+                                if (!entry.isDirectory && entry.size <= MAX_ENTRY_SIZE) {
                                     val bytes = tar.readBytes()
                                     channel.send(String(bytes))
+                                } else if (entry.size > MAX_ENTRY_SIZE) {
+                                    logger.warn("Skipping oversized entry: ${entry.name} (${entry.size} bytes)")
                                 }
                                 entry = tar.nextEntry
                             }
