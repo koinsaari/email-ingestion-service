@@ -1,11 +1,12 @@
 package com.aarokoinsaari.core
 
+import kotlin.test.assertEquals
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.testcontainers.containers.GenericContainer
 import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
-import kotlin.test.assertEquals
 
 @Testcontainers
 class RedisRepositoryTest {
@@ -22,6 +23,11 @@ class RedisRepositoryTest {
         val url = "redis://${redis.host}:${redis.getMappedPort(6379)}"
         repository = RedisRepository(url)
         repository.resetAll()
+    }
+
+    @AfterEach
+    fun teardown() {
+        repository.close()
     }
 
     @Test
@@ -88,6 +94,50 @@ class RedisRepositoryTest {
         val topSenders = repository.getTopSenders(10)
         assertEquals("alice@enron.com", topSenders[0].first)
         assertEquals(2.0, topSenders[0].second)
+    }
+
+    @Test
+    fun `flushBatch with empty list does not change state`() {
+        repository.flushBatch(emptyList())
+
+        assertEquals(0L, repository.getTotalMessages())
+        assertEquals(emptyList(), repository.getTopSenders(10))
+    }
+
+    @Test
+    fun `flushBatch handles duplicate sender in single batch`() {
+        repository.flushBatch(listOf(
+            "same@enron.com",
+            "same@enron.com",
+            "same@enron.com",
+            "same@enron.com",
+            "same@enron.com"
+        ))
+
+        val topSenders = repository.getTopSenders(10)
+        assertEquals(1, topSenders.size)
+        assertEquals("same@enron.com", topSenders[0].first)
+        assertEquals(5.0, topSenders[0].second)
+        assertEquals(5L, repository.getTotalMessages())
+    }
+
+    @Test
+    fun `flushBatch handles special characters in email addresses`() {
+        val specialEmails = listOf(
+            "user+tag@enron.com",
+            "first.last@enron.com",
+            "\"quoted\"@enron.com"
+        )
+        repository.flushBatch(specialEmails)
+
+        assertEquals(3L, repository.getTotalMessages())
+        val topSenders = repository.getTopSenders(10)
+        assertEquals(3, topSenders.size)
+    }
+
+    @Test
+    fun `getTopSenders returns empty list when no data`() {
+        assertEquals(emptyList(), repository.getTopSenders(10))
     }
 
     @Test
